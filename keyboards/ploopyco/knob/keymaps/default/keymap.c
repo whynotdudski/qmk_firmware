@@ -47,7 +47,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
         // Establish a deadzone to prevent spurious inputs
         if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
             current_position = ra;
-            mouse_report.v = delta / POINTING_DEVICE_AS5600_SPEED_DIV;
+            mouse_report.v = -delta / POINTING_DEVICE_AS5600_SPEED_DIV;
         }
     } else {
         // Certain operating systems, like MacOS, don't play well with the
@@ -55,10 +55,10 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
         // https://github.com/qmk/qmk_firmware/issues/17585#issuecomment-2325248167
         if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
             current_position = ra;
-            mouse_report.v = 1;
+            mouse_report.v = -1;
         } else if (delta <= -POINTING_DEVICE_AS5600_TICK_COUNT) {
             current_position = ra;
-            mouse_report.v = -1;
+            mouse_report.v = 1;
         }
     }
 
