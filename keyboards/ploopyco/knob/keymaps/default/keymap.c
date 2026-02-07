@@ -15,7 +15,7 @@
 #define ACCEL_THRESHOLD_VFAST 20   // Very fast spinning
 #define ACCEL_THRESHOLD_FAST  40   // Fast rotation
 #define ACCEL_THRESHOLD_MED   80   // Medium rotation
-#define ACCEL_THRESHOLD_SLOW  150  // Gentle rotation
+#define ACCEL_THRESHOLD_SLOW  200  // Gentle rotation
 
 // Speed multipliers for each threshold
 #define ACCEL_MULT_VFAST 5  // 5x speed for very fast
