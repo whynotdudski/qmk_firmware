@@ -1,5 +1,5 @@
 /* Copyright 2023 Colin Lam (Ploopy Corporation)
- * Dual-layer: Scroll + Click-drag with F23 hold toggle
+ * Inverted scroll + acceleration + ScrollLock drag scroll toggle
  * Configuration: adapted_1
  */
 
@@ -11,32 +11,20 @@
 #endif
 
 // ===== ACCELERATION SETTINGS - ADJUST THESE VALUES =====
-// Time thresholds in milliseconds (lower = faster rotation needed)
-#define ACCEL_THRESHOLD_VFAST 20   // Very fast spinning
-#define ACCEL_THRESHOLD_FAST  40   // Fast rotation
-#define ACCEL_THRESHOLD_MED   80   // Medium rotation
-#define ACCEL_THRESHOLD_SLOW  200  // Gentle rotation
+#define ACCEL_THRESHOLD_VFAST 20
+#define ACCEL_THRESHOLD_FAST  40
+#define ACCEL_THRESHOLD_MED   80
+#define ACCEL_THRESHOLD_SLOW  150
 
-// Speed multipliers for each threshold
-#define ACCEL_MULT_VFAST 5  // 5x speed for very fast
-#define ACCEL_MULT_FAST  3  // 3x speed for fast
-#define ACCEL_MULT_MED   2  // 2x speed for medium
-#define ACCEL_MULT_SLOW  1  // 1x speed (normal, no acceleration)
-
-// Click-drag release timeout (ms)
-#define DRAG_RELEASE_TIMEOUT 400  // How long to wait before releasing click
+#define ACCEL_MULT_VFAST 5
+#define ACCEL_MULT_FAST  3
+#define ACCEL_MULT_MED   2
+#define ACCEL_MULT_SLOW  1
 // =======================================================
-
-// Layers
-enum layers {
-    _SCROLL = 0,
-    _ABLETON
-};
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {{{ KC_NO }}};
 
 static uint16_t current_position = 0;
-static bool dragging = false;
 static uint16_t last_rotation_time = 0;
 
 void keyboard_post_init_user(void) {
@@ -47,14 +35,14 @@ void keyboard_post_init_user(void) {
 #ifdef RAW_ENABLE
 void raw_hid_receive(uint8_t *data, uint8_t length) {
     switch (data[0]) {
-        case 0x01:  // Toggle layer
-            layer_invert(_ABLETON);
+        case 0x01:
+            toggle_drag_scroll();
             break;
-        case 0x02:  // Force scroll layer (F23 released)
-            layer_off(_ABLETON);
+        case 0x02:
+            if (is_drag_scroll) toggle_drag_scroll();
             break;
-        case 0x03:  // Force Ableton layer (F23 pressed)
-            layer_on(_ABLETON);
+        case 0x03:
+            if (!is_drag_scroll) toggle_drag_scroll();
             break;
     }
 }
@@ -66,78 +54,40 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
     uint16_t now = timer_read();
 
     // Wrap into [-2048, 2047]
-    if (delta > 2048) {
-        delta -= 4096;
-    } else if (delta < -2048) {
-        delta += 4096;
-    }
+    if (delta > 2048) delta -= 4096;
+    else if (delta < -2048) delta += 4096;
 
-    // Calculate velocity-based acceleration
+    // ScrollLock controls drag scroll mode
+    bool scrolllock = host_keyboard_led_state().scroll_lock;
+    if (scrolllock && !is_drag_scroll) toggle_drag_scroll();
+    else if (!scrolllock && is_drag_scroll) toggle_drag_scroll();
+
+    // Acceleration
     uint16_t time_since_last = timer_elapsed(last_rotation_time);
     int16_t speed_multiplier;
-    
-    if (time_since_last < ACCEL_THRESHOLD_VFAST) {
+
+    if (time_since_last < ACCEL_THRESHOLD_VFAST)
         speed_multiplier = ACCEL_MULT_VFAST;
-    } else if (time_since_last < ACCEL_THRESHOLD_FAST) {
+    else if (time_since_last < ACCEL_THRESHOLD_FAST)
         speed_multiplier = ACCEL_MULT_FAST;
-    } else if (time_since_last < ACCEL_THRESHOLD_MED) {
+    else if (time_since_last < ACCEL_THRESHOLD_MED)
         speed_multiplier = ACCEL_MULT_MED;
-    } else if (time_since_last < ACCEL_THRESHOLD_SLOW) {
+    else if (time_since_last < ACCEL_THRESHOLD_SLOW)
         speed_multiplier = ACCEL_MULT_SLOW;
-    } else {
-        speed_multiplier = 1;  // Very slow = no acceleration
+    else
+        speed_multiplier = 1;
+
+    // Apply inverted scroll with acceleration
+    if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
+        if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
+            mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
+        } else {
+            mouse_report.v = (delta > 0) ? -speed_multiplier : speed_multiplier;
+        }
+        current_position = ra;
+        last_rotation_time = now;
     }
 
-    if (IS_LAYER_ON(_ABLETON)) {
-        // ABLETON LAYER: Click + drag with acceleration
-        if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-            if (!dragging) {
-                mouse_report.buttons |= MOUSE_BTN1;  // Left click down
-                dragging = true;
-            }
-            
-            // Move mouse vertically with acceleration (NOT inverted)
-            if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
-                mouse_report.y = (delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
-            } else {
-                mouse_report.y = (delta > 0) ? speed_multiplier : -speed_multiplier;
-            }
-            
-            current_position = ra;
-            last_rotation_time = now;
-        }
-        
-        // Release click after timeout
-        if (dragging && timer_elapsed(last_rotation_time) > DRAG_RELEASE_TIMEOUT) {
-            mouse_report.buttons &= ~MOUSE_BTN1;  // Left click up
-            dragging = false;
-        }
-        
-   } else {
-        // SCROLL LAYER: Normal scroll with acceleration (inverted)
-        // Shift held = horizontal scroll (normal direction)
-        // No shift = vertical scroll (inverted)
-        bool shift_held = get_mods() & MOD_MASK_SHIFT;
-        
-        if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
-            if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-                current_position = ra;
-                if (shift_held) {
-                    mouse_report.v = (delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
-                } else {
-                    mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
-                }
-            }
-        } else {
-            if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
-                current_position = ra;
-                mouse_report.v = shift_held ? speed_multiplier : -speed_multiplier;
-            } else if (delta <= -POINTING_DEVICE_AS5600_TICK_COUNT) {
-                current_position = ra;
-                mouse_report.v = shift_held ? -speed_multiplier : speed_multiplier;
-            }
-        }
-    }
     return mouse_report;
 }
 
