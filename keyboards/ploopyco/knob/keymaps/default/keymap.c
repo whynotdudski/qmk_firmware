@@ -113,24 +113,31 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             dragging = false;
         }
         
-    } else {
+   } else {
         // SCROLL LAYER: Normal scroll with acceleration (inverted)
+        // Shift held = horizontal scroll (normal direction)
+        // No shift = vertical scroll (inverted)
+        bool shift_held = get_mods() & MOD_MASK_SHIFT;
+        
         if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
             if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
                 current_position = ra;
-                mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
+                if (shift_held) {
+                    mouse_report.v = (delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
+                } else {
+                    mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
+                }
             }
         } else {
             if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
                 current_position = ra;
-                mouse_report.v = -speed_multiplier;  // Inverted with acceleration
+                mouse_report.v = shift_held ? speed_multiplier : -speed_multiplier;
             } else if (delta <= -POINTING_DEVICE_AS5600_TICK_COUNT) {
                 current_position = ra;
-                mouse_report.v = speed_multiplier;  // Inverted with acceleration
+                mouse_report.v = shift_held ? -speed_multiplier : speed_multiplier;
             }
         }
     }
-
     return mouse_report;
 }
 
