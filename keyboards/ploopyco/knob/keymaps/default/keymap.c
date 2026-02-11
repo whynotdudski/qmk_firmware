@@ -1,98 +1,71 @@
-/* Copyright 2023 Colin Lam (Ploopy Corporation)
- * Inverted scroll + acceleration + ScrollLock drag scroll toggle
- * Configuration: adapted_1
+/* Copyright 2025 Ploopy Corporation
+ * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #include QMK_KEYBOARD_H
-#include "as5600.h"
-
-#ifdef RAW_ENABLE
 #include "raw_hid.h"
-#endif
 
-extern bool is_drag_scroll;  // Access drag scroll state from ploopyco.c
+// ─── Ploopy firmware speed modes ──────────────────────────────────────────
+// SLOW = Ploopy's default shipped firmware (SPEED_DIV=2, DEADZONE=12)
+// FAST = Ploopy's fast firmware (SPEED_DIV=1, DEADZONE=6)
+// Note: DEADZONE is enforced in ploopyco.c hardware layer using the #define.
+// We can't change it dynamically, so we only switch the division here.
+// The effective result: CapsLock ON = ~2x faster, more responsive to light touches.
+#define SPEED_DIV_SLOW    2
+#define SPEED_DIV_FAST    1
 
-// ===== ACCELERATION SETTINGS - ADJUST THESE VALUES =====
-#define ACCEL_THRESHOLD_VFAST 20
-#define ACCEL_THRESHOLD_FAST  40
-#define ACCEL_THRESHOLD_MED   80
-#define ACCEL_THRESHOLD_SLOW  150
+// ─── Conservative acceleration ────────────────────────────────────────────
+// 1:1 for most scrolling. Only multiplies at genuinely fast spins.
+#define ACCEL_THRESHOLD_FAST  30   // <30ms between ticks = very fast spin → 3x
+#define ACCEL_THRESHOLD_MED   70   // <70ms between ticks = moderate spin  → 2x
+#define ACCEL_MULT_FAST        3
+#define ACCEL_MULT_MED         2
+// >70ms (slow/precise scrolling) = 1x, no change
 
-#define ACCEL_MULT_VFAST 5
-#define ACCEL_MULT_FAST  3
-#define ACCEL_MULT_MED   2
-#define ACCEL_MULT_SLOW  1
-// =======================================================
+// ─── State ────────────────────────────────────────────────────────────────
+static bool     scroll_inverted = true;
+static uint32_t last_event_ms   = 0;
 
-const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {{{ KC_NO }}};
+extern bool is_drag_scroll;  // suppress linker warning from ploopyco.c
 
-static uint16_t current_position = 0;
-static uint16_t last_rotation_time = 0;
+const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
+    [0] = LAYOUT(KC_NO)
+};
 
-void keyboard_post_init_user(void) {
-    as5600_init();
-    current_position = as5600_get_rawangle();
-}
-
-#ifdef RAW_ENABLE
-void raw_hid_receive(uint8_t *data, uint8_t length) {
-    switch (data[0]) {
-        case 0x01:
-            toggle_drag_scroll();
-            break;
-        case 0x02:
-            if (is_drag_scroll) toggle_drag_scroll();
-            break;
-        case 0x03:
-            if (!is_drag_scroll) toggle_drag_scroll();
-            break;
-    }
-}
-#endif
-
+// ─── Scroll logic ─────────────────────────────────────────────────────────
 report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
-    uint16_t ra = as5600_get_rawangle();
-    int16_t delta = (int16_t)(ra - current_position);
-    uint16_t now = timer_read();
+    if (mouse_report.v == 0) return mouse_report;
 
-    // Wrap into [-2048, 2047]
-    if (delta > 2048) delta -= 4096;
-    else if (delta < -2048) delta += 4096;
+    uint32_t now     = timer_read32();
+    uint32_t elapsed = now - last_event_ms;
+    last_event_ms    = now;
 
-    // ScrollLock controls drag scroll mode
-    bool scrolllock = host_keyboard_led_state().scroll_lock;
-    if (scrolllock && !is_drag_scroll) toggle_drag_scroll();
-    else if (!scrolllock && is_drag_scroll) toggle_drag_scroll();
+    // CapsLock ON = fast mode (mirrors Ploopy fast firmware)
+    bool fast_mode  = host_keyboard_led_state().caps_lock;
+    int8_t speed_div = fast_mode ? SPEED_DIV_FAST : SPEED_DIV_SLOW;
 
-    // Acceleration
-    uint16_t time_since_last = timer_elapsed(last_rotation_time);
-    int16_t speed_multiplier;
+    // Conservative acceleration: only kicks in at fast spin
+    int multiplier = 1;
+    if      (elapsed < ACCEL_THRESHOLD_FAST) multiplier = ACCEL_MULT_FAST;
+    else if (elapsed < ACCEL_THRESHOLD_MED)  multiplier = ACCEL_MULT_MED;
 
-    if (time_since_last < ACCEL_THRESHOLD_VFAST)
-        speed_multiplier = ACCEL_MULT_VFAST;
-    else if (time_since_last < ACCEL_THRESHOLD_FAST)
-        speed_multiplier = ACCEL_MULT_FAST;
-    else if (time_since_last < ACCEL_THRESHOLD_MED)
-        speed_multiplier = ACCEL_MULT_MED;
-    else if (time_since_last < ACCEL_THRESHOLD_SLOW)
-        speed_multiplier = ACCEL_MULT_SLOW;
-    else
-        speed_multiplier = 1;
+    // Apply division + acceleration
+    int8_t val = (mouse_report.v / speed_div) * multiplier;
 
-    // Apply inverted scroll with acceleration
-    if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-        if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
-            mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
-        } else {
-            mouse_report.v = (delta > 0) ? -speed_multiplier : speed_multiplier;
-        }
-        current_position = ra;
-        last_rotation_time = now;
-    }
+    // Prevent rounding to zero on slow precise scroll
+    if (val == 0 && mouse_report.v != 0)
+        val = (mouse_report.v > 0) ? 1 : -1;
 
+    mouse_report.v = scroll_inverted ? -val : val;
     return mouse_report;
 }
 
-bool pointing_device_driver_init(void) {
-    return true;
+// ─── Raw HID (Python / Stream Deck) ───────────────────────────────────────
+void raw_hid_receive(uint8_t *data, uint8_t length) {
+    switch (data[0]) {
+        case 0x01: scroll_inverted = !scroll_inverted; break;
+        case 0x02: scroll_inverted = false;             break;
+        case 0x03: scroll_inverted = true;              break;
+    }
+    raw_hid_send(data, length);  // echo confirmation
 }
