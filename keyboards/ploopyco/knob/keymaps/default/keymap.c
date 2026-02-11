@@ -9,6 +9,12 @@
 #include "raw_hid.h"
 #endif
 
+// Layers
+enum layers {
+    _SCROLL = 0,
+    _ABLETON
+};
+
 // ===== TUNE THESE =====
 // Thresholds: time in ms between rotation events (smaller = faster spin)
 // Stays at 1x for anything slower than FAST threshold
