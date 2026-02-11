@@ -1,5 +1,5 @@
 /* Copyright 2023 Colin Lam (Ploopy Corporation)
- * Inverted scroll + conservative acceleration + CapsLock fast/slow toggle
+ * Inverted scroll + velocity acceleration + CapsLock fast mode
  */
 
 #include QMK_KEYBOARD_H
@@ -9,28 +9,22 @@
 #include "raw_hid.h"
 #endif
 
-// ===== ACCELERATION SETTINGS =====
-// Stays at 1x until you spin faster than 50ms between events
-// Gentle 2x at moderate spin, 3x only at very fast spin
-#define ACCEL_THRESHOLD_VFAST 15   // <15ms between events = 3x (very fast spin)
-#define ACCEL_THRESHOLD_FAST  50   // <50ms = 2x (moderate spin)
-// anything slower = 1x (normal)
+// ===== TUNE THESE =====
+// Thresholds: time in ms between rotation events (smaller = faster spin)
+// Stays at 1x for anything slower than FAST threshold
+#define ACCEL_THRESHOLD_FAST  60   // ms — below this = 2x
+#define ACCEL_THRESHOLD_VFAST 25   // ms — below this = 4x
 
-#define ACCEL_MULT_VFAST 3
-#define ACCEL_MULT_FAST  2
+// Slow mode (CapsLock OFF): normal base, gentle acceleration
+#define ACCEL_SLOW_FAST  2   // 2x at fast spin
+#define ACCEL_SLOW_VFAST 4   // 4x at very fast spin
 
-// CapsLock OFF = slow mode (divide by 2, mirrors Ploopy slow firmware)
-// CapsLock ON  = fast mode (divide by 1, mirrors Ploopy fast firmware)
-#define SPEED_DIV_SLOW 2
-#define SPEED_DIV_FAST 1
+// Fast mode (CapsLock ON): same thresholds, bigger multipliers
+#define ACCEL_FAST_FAST  4   // 4x at fast spin
+#define ACCEL_FAST_VFAST 8   // 8x at very fast spin
+// ======================
 
 #define DRAG_RELEASE_TIMEOUT 400
-// ==================================
-
-enum layers {
-    _SCROLL = 0,
-    _ABLETON
-};
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {{{ KC_NO }}};
 
@@ -54,23 +48,25 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 #endif
 
 report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
-    uint16_t ra = as5600_get_rawangle();
-    int16_t delta = (int16_t)(ra - current_position);
-    uint16_t now = timer_read();
+    uint16_t ra    = as5600_get_rawangle();
+    int16_t  delta = (int16_t)(ra - current_position);
+    uint16_t now   = timer_read();
 
     if (delta > 2048)       delta -= 4096;
     else if (delta < -2048) delta += 4096;
 
-    // CapsLock = fast mode
-    int8_t speed_div = host_keyboard_led_state().caps_lock ? SPEED_DIV_FAST : SPEED_DIV_SLOW;
+    bool caps = host_keyboard_led_state().caps_lock;
 
-    // Conservative acceleration: 1x most of the time
     uint16_t time_since_last = timer_elapsed(last_rotation_time);
     int16_t speed_multiplier;
 
-    if      (time_since_last < ACCEL_THRESHOLD_VFAST) speed_multiplier = ACCEL_MULT_VFAST;
-    else if (time_since_last < ACCEL_THRESHOLD_FAST)  speed_multiplier = ACCEL_MULT_FAST;
-    else                                               speed_multiplier = 1;
+    if (time_since_last < ACCEL_THRESHOLD_VFAST) {
+        speed_multiplier = caps ? ACCEL_FAST_VFAST : ACCEL_SLOW_VFAST;
+    } else if (time_since_last < ACCEL_THRESHOLD_FAST) {
+        speed_multiplier = caps ? ACCEL_FAST_FAST : ACCEL_SLOW_FAST;
+    } else {
+        speed_multiplier = caps ? 2 : 1;  // fast mode has 2x baseline
+    }
 
     if (IS_LAYER_ON(_ABLETON)) {
         if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
@@ -79,7 +75,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
                 dragging = true;
             }
             if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
-                mouse_report.y = (delta * speed_multiplier) / (POINTING_DEVICE_AS5600_SPEED_DIV * speed_div);
+                mouse_report.y = (delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
             } else {
                 mouse_report.y = (delta > 0) ? speed_multiplier : -speed_multiplier;
             }
@@ -94,7 +90,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
         if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
             if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
                 current_position = ra;
-                mouse_report.v = (-delta * speed_multiplier) / (POINTING_DEVICE_AS5600_SPEED_DIV * speed_div);
+                mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
             }
         } else {
             if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
