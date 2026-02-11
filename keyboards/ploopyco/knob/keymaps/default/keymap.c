@@ -10,6 +10,8 @@
 #include "raw_hid.h"
 #endif
 
+extern bool is_drag_scroll;  // Access drag scroll state from ploopyco.c
+
 // ===== ACCELERATION SETTINGS - ADJUST THESE VALUES =====
 #define ACCEL_THRESHOLD_VFAST 20
 #define ACCEL_THRESHOLD_FAST  40
