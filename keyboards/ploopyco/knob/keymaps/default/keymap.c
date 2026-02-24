@@ -195,7 +195,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             }
             // Every 50ms: snapshot the accumulator and reset
             if (timer_elapsed(delta_window_start) >= 50) {
-                delta_reported     = (delta_accum > 65535) ? 65535 : (uint16_t)delta_accum;
+                delta_reported     = (uint16_t)(delta_accum & 0xFFFF);
                 delta_accum        = 0;
                 delta_window_start = timer_read();
             }
