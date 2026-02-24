@@ -107,12 +107,12 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         // Speed query — GUI polls this for live monitor dot
         // Responds with current ms since last rotation as uint16 LE
         case 0x11: {
-            uint8_t resp[RAW_EPSIZE] = {0};
-            resp[0] = 0x11;
+            uint8_t resp[32] = {0};
             uint16_t t = timer_elapsed(last_rotation_time);
+            resp[0] = 0x11;
             resp[1] = t & 0xFF;
             resp[2] = (t >> 8) & 0xFF;
-            raw_hid_send(resp, RAW_EPSIZE);
+            raw_hid_send(resp, 32);
             break;
         }
 
