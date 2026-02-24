@@ -1,5 +1,5 @@
 /* Copyright 2023 Colin Lam (Ploopy Corporation)
- * Inverted scroll + velocity acceleration + CapsLock fast mode
+ * Aggressive acceleration for Windows Lines = 1
  */
 
 #include QMK_KEYBOARD_H
@@ -15,20 +15,28 @@ enum layers {
     _ABLETON
 };
 
-// ===== TUNE THESE =====
-// Thresholds: time in ms between rotation events (smaller = faster spin)
-// Stays at 1x for anything slower than FAST threshold
-#define ACCEL_THRESHOLD_FAST  60   // ms — below this = 2x
-#define ACCEL_THRESHOLD_VFAST 25   // ms — below this = 4x
+// ===== ACCELERATION CURVE =====
+// TIME THRESHOLDS (ms between rotations)
+// HIGHER number = easier to trigger (kicks in at slower rotation speeds)
+#define ACCEL_THRESHOLD_ULTRAFAST 20   // Ultra fast spinning
+#define ACCEL_THRESHOLD_VFAST     40   // Very fast
+#define ACCEL_THRESHOLD_FAST      80   // Fast spin
+#define ACCEL_THRESHOLD_NORMAL    150  // Normal speed (EASY to trigger = 3x kicks in quick)
 
-// Slow mode (CapsLock OFF): normal base, gentle acceleration
-#define ACCEL_SLOW_FAST  2   // 2x at fast spin
-#define ACCEL_SLOW_VFAST 4   // 4x at very fast spin
+// SLOW MODE (CapsLock OFF)
+#define ACCEL_SLOW_ULTRAFAST 15  // Ultra fast = 15 lines
+#define ACCEL_SLOW_VFAST     8   // Very fast = 8 lines
+#define ACCEL_SLOW_FAST      5   // Fast = 5 lines
+#define ACCEL_SLOW_NORMAL    3   // Normal = 3 lines (this is your baseline feel)
+// Very slow (>150ms) = 1x = 1 line (precise control)
 
-// Fast mode (CapsLock ON): same thresholds, bigger multipliers
-#define ACCEL_FAST_FAST  4   // 4x at fast spin
-#define ACCEL_FAST_VFAST 8   // 8x at very fast spin
-// ======================
+// FAST MODE (CapsLock ON) - MUCH faster
+#define ACCEL_FAST_ULTRAFAST 30  // Ultra fast = 30 lines
+#define ACCEL_FAST_VFAST     18  // Very fast = 18 lines
+#define ACCEL_FAST_FAST      12  // Fast = 12 lines
+#define ACCEL_FAST_NORMAL    8   // Normal = 8 lines
+// Very slow = 3x baseline (still faster than slow mode)
+// ==============================
 
 #define DRAG_RELEASE_TIMEOUT 400
 
@@ -66,12 +74,17 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
     uint16_t time_since_last = timer_elapsed(last_rotation_time);
     int16_t speed_multiplier;
 
-    if (time_since_last < ACCEL_THRESHOLD_VFAST) {
+    if (time_since_last < ACCEL_THRESHOLD_ULTRAFAST) {
+        speed_multiplier = caps ? ACCEL_FAST_ULTRAFAST : ACCEL_SLOW_ULTRAFAST;
+    } else if (time_since_last < ACCEL_THRESHOLD_VFAST) {
         speed_multiplier = caps ? ACCEL_FAST_VFAST : ACCEL_SLOW_VFAST;
     } else if (time_since_last < ACCEL_THRESHOLD_FAST) {
         speed_multiplier = caps ? ACCEL_FAST_FAST : ACCEL_SLOW_FAST;
+    } else if (time_since_last < ACCEL_THRESHOLD_NORMAL) {
+        speed_multiplier = caps ? ACCEL_FAST_NORMAL : ACCEL_SLOW_NORMAL;
     } else {
-        speed_multiplier = caps ? 2 : 1;  // fast mode has 2x baseline
+        // Very slow rotation
+        speed_multiplier = caps ? 3 : 1;
     }
 
     if (IS_LAYER_ON(_ABLETON)) {
@@ -96,6 +109,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
         if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
             if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
                 current_position = ra;
+                last_rotation_time = now;
                 mouse_report.v = (-delta * speed_multiplier) / POINTING_DEVICE_AS5600_SPEED_DIV;
             }
         } else {
