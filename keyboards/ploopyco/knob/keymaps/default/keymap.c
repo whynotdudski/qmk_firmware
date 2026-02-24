@@ -97,15 +97,21 @@ void keyboard_post_init_user(void) {
 // ─── HID receive ─────────────────────────────────────────────────────────────
 #ifdef RAW_ENABLE
 void raw_hid_receive(uint8_t *data, uint8_t length) {
-    switch (data[0]) {
+    // On Windows via hidapi, hid.write() first byte is the report ID.
+    // QMK's raw_hid_receive gets the packet AFTER report ID is stripped.
+    // So data[0] = command byte (what Python sends as pkt[1]).
+    // Python packet: [0x00(report_id), cmd, payload...]
+    // Firmware sees: [cmd, payload...]
+    uint8_t cmd = data[0];
 
-        // Layer control (existing)
+    switch (cmd) {
+
+        // Layer control (matches existing toggle_knob_layer.py behavior)
         case 0x01: layer_invert(_ABLETON); break;
         case 0x02: layer_off(_ABLETON);    break;
         case 0x03: layer_on(_ABLETON);     break;
 
-        // Speed query — GUI polls this for live monitor dot
-        // Responds with current ms since last rotation as uint16 LE
+        // Speed query — GUI polls for live monitor dot
         case 0x11: {
             uint8_t resp[32] = {0};
             uint16_t t = timer_elapsed(last_rotation_time);
@@ -116,13 +122,10 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
             break;
         }
 
-        // Curve update from GUI
-        // Packet format: [0x10, point_count, ms_lo, ms_hi, slow, fast, ...]
-        // Points must be sent sorted ASCENDING by ms (fastest first)
+        // Curve update — data[0]=0x10, data[1]=count, data[2+]=points
         case 0x10: {
             uint8_t count = data[1];
             if (count < 2 || count > MAX_CURVE_POINTS) break;
-
             for (uint8_t i = 0; i < count; i++) {
                 uint8_t offset = 2 + i * 4;
                 if (offset + 3 >= length) break;
@@ -133,7 +136,6 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
                 slow_mults[i]       = slow;
                 fast_mults[i]       = fast;
             }
-            // Fill remaining slots with baseline values
             for (uint8_t i = count; i < MAX_CURVE_POINTS; i++) {
                 curve_thresholds[i] = 0;
                 slow_mults[i]       = slow_mults[count - 1];
