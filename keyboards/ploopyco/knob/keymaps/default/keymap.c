@@ -77,10 +77,15 @@ static uint8_t fast_mults[MAX_CURVE_POINTS] = {
 static uint8_t curve_point_count = 6;
 
 // ─── State ────────────────────────────────────────────────────────────────────
-static uint16_t current_position = 0;
-static bool     dragging         = false;
-static uint16_t last_move_time   = 0;
-static uint8_t  last_abs_delta   = 0;  // for GUI live dot
+static uint16_t current_position  = 0;
+static bool     dragging          = false;
+static uint16_t last_move_time    = 0;
+
+// GUI live dot: accumulate abs(delta) over a rolling 50ms window
+// so the reported value reflects actual scroll speed, not a single poll
+static uint32_t delta_accum       = 0;  // sum of abs(delta) in current window
+static uint16_t delta_window_start = 0; // timer value when window opened
+static uint8_t  delta_reported    = 0;  // last completed window sum, capped at 255
 
 #define DRAG_RELEASE_TIMEOUT 400
 
@@ -100,7 +105,7 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         case 0x11: {
             uint8_t resp[32] = {0};
             resp[0] = 0x11;
-            resp[1] = last_abs_delta;
+            resp[1] = delta_reported;
             raw_hid_send(resp, 32);
             break;
         }
@@ -161,7 +166,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
         if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
             uint8_t abs_d  = (uint8_t)(delta < 0 ? -delta : delta);
             int16_t mult   = get_mult_fp(abs_d, caps);
-            last_abs_delta = abs_d;
+            delta_accum += abs_d;
             if (!dragging) { mouse_report.buttons |= MOUSE_BTN1; dragging = true; }
             if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
                 mouse_report.y = (int8_t)((-delta * mult) / (POINTING_DEVICE_AS5600_SPEED_DIV * 16));
@@ -179,21 +184,31 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
     } else {
         if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
             if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-                uint8_t abs_d  = (uint8_t)(delta < 0 ? -delta : delta);
-                int16_t mult   = get_mult_fp(abs_d, caps);
-                last_abs_delta = abs_d;
+                uint8_t abs_d = (uint8_t)(delta < 0 ? -delta : delta);
+                int16_t mult  = get_mult_fp(abs_d, caps);
                 current_position = ra;
                 mouse_report.v = (int8_t)((-delta * mult) / (POINTING_DEVICE_AS5600_SPEED_DIV * 16));
+
+                // Accumulate delta for GUI speed reporting
+                delta_accum += abs_d;
+            }
+            // Every 50ms: snapshot the accumulator and reset
+            if (timer_elapsed(delta_window_start) >= 50) {
+                delta_reported     = (delta_accum > 255) ? 255 : (uint8_t)delta_accum;
+                delta_accum        = 0;
+                delta_window_start = timer_read();
             }
         } else {
             if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
-                last_abs_delta = (uint8_t)delta;
-                int16_t mult   = get_mult_fp(last_abs_delta, caps);
+                uint8_t abs_d_mac = (uint8_t)delta;
+                delta_accum += abs_d_mac;
+                int16_t mult   = get_mult_fp(abs_d_mac, caps);
                 current_position = ra;
                 mouse_report.v = -(int8_t)(mult / 16);
             } else if (delta <= -POINTING_DEVICE_AS5600_TICK_COUNT) {
-                last_abs_delta = (uint8_t)(-delta);
-                int16_t mult   = get_mult_fp(last_abs_delta, caps);
+                uint8_t abs_d_mac = (uint8_t)(-delta);
+                delta_accum += abs_d_mac;
+                int16_t mult   = get_mult_fp(abs_d_mac, caps);
                 current_position = ra;
                 mouse_report.v = (int8_t)(mult / 16);
             }
