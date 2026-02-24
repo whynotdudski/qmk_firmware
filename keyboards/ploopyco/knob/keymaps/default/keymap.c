@@ -162,8 +162,9 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
 
     if (IS_LAYER_ON(_ABLETON)) {
         if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-            delta_accum += (delta < 0 ? -delta : delta);
-            int32_t mult = get_mult_fp(delta_reported, caps);
+            uint16_t abs_d2 = (delta < 0 ? -delta : delta);
+            delta_accum += abs_d2;
+            int32_t mult = get_mult_fp((uint16_t)(abs_d2 * 50), caps);
             if (!dragging) { mouse_report.buttons |= MOUSE_BTN1; dragging = true; }
             if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
                 mouse_report.y = (int8_t)((-delta * mult) / (POINTING_DEVICE_AS5600_SPEED_DIV * SCROLL_SCALE));
@@ -181,11 +182,9 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
     } else {
         if (detected_host_os() == OS_WINDOWS || detected_host_os() == OS_LINUX) {
             if (delta > POINTING_DEVICE_AS5600_DEADZONE || delta < -POINTING_DEVICE_AS5600_DEADZONE) {
-                delta_accum += (delta < 0 ? -delta : delta);
-                int32_t mult = get_mult_fp(delta_reported, caps);
-
-                // Add to scroll accumulator (fixed-point)
-                // -delta because original firmware inverts
+                uint16_t abs_d = (delta < 0 ? -delta : delta);
+                delta_accum += abs_d;
+                int32_t mult = get_mult_fp((uint16_t)(abs_d * 50), caps);
                 scroll_accum += (-delta * mult) / POINTING_DEVICE_AS5600_SPEED_DIV;
                 current_position = ra;
             }
@@ -204,12 +203,12 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             // macOS tick-based
             if (delta >= POINTING_DEVICE_AS5600_TICK_COUNT) {
                 delta_accum += (uint16_t)delta;
-                int32_t mult = get_mult_fp(delta_reported, caps);
+                int32_t mult = get_mult_fp((uint16_t)(delta * 50), caps);
                 current_position = ra;
                 mouse_report.v = -(int8_t)(mult / SCROLL_SCALE);
             } else if (delta <= -POINTING_DEVICE_AS5600_TICK_COUNT) {
                 delta_accum += (uint16_t)(-delta);
-                int32_t mult = get_mult_fp(delta_reported, caps);
+                int32_t mult = get_mult_fp((uint16_t)((-delta) * 50), caps);
                 current_position = ra;
                 mouse_report.v = (int8_t)(mult / SCROLL_SCALE);
             }
