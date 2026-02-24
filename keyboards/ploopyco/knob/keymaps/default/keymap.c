@@ -85,7 +85,7 @@ static uint16_t last_move_time    = 0;
 // so the reported value reflects actual scroll speed, not a single poll
 static uint32_t delta_accum       = 0;  // sum of abs(delta) in current window
 static uint16_t delta_window_start = 0; // timer value when window opened
-static uint8_t  delta_reported    = 0;  // last completed window sum, capped at 255
+static uint16_t delta_reported    = 0;  // last completed window sum
 
 #define DRAG_RELEASE_TIMEOUT 400
 
@@ -105,7 +105,8 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         case 0x11: {
             uint8_t resp[32] = {0};
             resp[0] = 0x11;
-            resp[1] = delta_reported;
+            resp[1] = delta_reported & 0xFF;
+            resp[2] = (delta_reported >> 8) & 0xFF;
             raw_hid_send(resp, 32);
             break;
         }
@@ -194,7 +195,7 @@ report_mouse_t pointing_device_task_user(report_mouse_t mouse_report) {
             }
             // Every 50ms: snapshot the accumulator and reset
             if (timer_elapsed(delta_window_start) >= 50) {
-                delta_reported     = (delta_accum > 255) ? 255 : (uint8_t)delta_accum;
+                delta_reported     = (delta_accum > 65535) ? 65535 : (uint16_t)delta_accum;
                 delta_accum        = 0;
                 delta_window_start = timer_read();
             }
