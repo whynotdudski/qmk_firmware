@@ -84,8 +84,8 @@ static uint8_t curve_point_count = 6;
 
 // ─── Ableton layer ────────────────────────────────────────────────────────────
 #define DRAG_RELEASE_TIMEOUT 400
-static uint16_t current_position  = 0;
-static bool     dragging          = false;
+static uint16_t current_position   = 0;
+static bool     dragging           = false;
 static uint16_t last_rotation_time = 0;
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -112,6 +112,7 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         case 0x03: layer_on(_ABLETON);     break;
 
         // Speed query — GUI polls for live monitor dot
+        // Returns time elapsed since last movement — large when idle, small when spinning
         case 0x11: {
             uint8_t resp[32] = {0};
             uint16_t t = timer_elapsed(last_rotation_time);
