@@ -104,6 +104,18 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         case 0x02: layer_off(_ABLETON);    break;
         case 0x03: layer_on(_ABLETON);     break;
 
+        // Speed query — GUI polls this for live monitor dot
+        // Responds with current ms since last rotation as uint16 LE
+        case 0x11: {
+            uint8_t resp[RAW_EPSIZE] = {0};
+            resp[0] = 0x11;
+            uint16_t t = timer_elapsed(last_rotation_time);
+            resp[1] = t & 0xFF;
+            resp[2] = (t >> 8) & 0xFF;
+            raw_hid_send(resp, RAW_EPSIZE);
+            break;
+        }
+
         // Curve update from GUI
         // Packet format: [0x10, point_count, ms_lo, ms_hi, slow, fast, ...]
         // Points must be sent sorted ASCENDING by ms (fastest first)
